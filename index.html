@@ -501,6 +501,15 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
 .wallet-add-money-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px; }
 .wallet-amount-btn { padding:10px 8px; border:1px solid var(--color-border); background:var(--color-bg-elevated); color:var(--color-text-primary); border-radius:var(--radius-sm); cursor:pointer; font-weight:700; }
 .wallet-amount-btn:hover, .wallet-amount-btn.is-selected { border-color:var(--color-cyan); color:var(--color-cyan); }
+.wallet-stepper { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; margin-top:8px; background:var(--color-bg-elevated); border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:6px; }
+.wallet-stepper__btn { width:40px; height:40px; border-radius:var(--radius-sm); border:1px solid var(--color-border); background:var(--color-bg-card); color:var(--color-text-primary); font-family:var(--font-display); font-size:20px; font-weight:700; cursor:pointer; display:grid; place-items:center; transition:border-color .15s ease, color .15s ease, background .15s ease; }
+.wallet-stepper__btn:hover { border-color:var(--color-cyan); color:var(--color-cyan); }
+.wallet-stepper__btn:active { transform:translateY(1px); }
+.wallet-stepper__btn[disabled] { opacity:.4; cursor:not-allowed; }
+.wallet-stepper__value-wrap { display:flex; align-items:center; justify-content:center; gap:4px; }
+.wallet-stepper__currency { font-family:var(--font-display); font-size:18px; font-weight:700; color:var(--color-cyan); }
+.wallet-stepper__input { width:100%; max-width:140px; background:transparent; border:none; outline:none; color:var(--color-text-primary); font-family:var(--font-display); font-size:22px; font-weight:700; text-align:center; -moz-appearance:textfield; }
+.wallet-stepper__input::-webkit-outer-spin-button, .wallet-stepper__input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
 .wallet-input { width:100%; margin-top:10px; padding:10px 12px; border:1px solid var(--color-border); background:var(--color-bg-elevated); color:var(--color-text-primary); border-radius:var(--radius-sm); font:inherit; outline:none; }
 .wallet-input:focus { border-color:var(--color-purple); }
 .wallet-payment-list { display:grid; gap:8px; margin-top:12px; }
@@ -668,11 +677,14 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
         </div>
         <div class="icon-btn" id="cart-icon-btn">🛒<span id="cart-count-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--color-gradient-brand);color:#06070a;font-size:10px;font-weight:700;border-radius:50%;width:16px;height:16px;align-items:center;justify-content:center;display:none;"></span></div>
         <div class="icon-btn notif-dot">🔔</div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div class="avatar" id="user-avatar">?</div>
-          <div style="line-height:1.2;">
-            <div style="font-size:13px;font-weight:600;" id="user-name">Guest</div>
-            <div style="font-size:11px;color:var(--color-purple);">Pro Member</div>
+        <div id="user-account-area" style="display:flex;align-items:center;gap:10px;">
+          <button class="tx-btn-primary" id="topbar-signin-btn" type="button" style="padding:8px 16px;font-size:12px;display:none;">SIGN IN</button>
+          <div id="user-account-info" style="display:none;align-items:center;gap:10px;cursor:pointer;">
+            <div class="avatar" id="user-avatar">?</div>
+            <div style="line-height:1.2;">
+              <div style="font-size:13px;font-weight:600;" id="user-name">Guest</div>
+              <div style="font-size:11px;color:var(--color-purple);cursor:pointer;" id="topbar-signout-btn">Sign Out</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1001,6 +1013,7 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
               <button class="wallet-action-btn" id="wallet-refresh-btn" type="button">↻ Refresh</button>
               <button class="wallet-action-btn" id="wallet-topup-history-btn" type="button">⏱ History</button>
             </div>
+            <div id="wallet-overview-status" class="action-feedback"></div>
             <div style="margin-top:18px;font-size:11px;color:var(--color-text-muted);line-height:1.5;">
               Wallet balance is displayed from Supabase when available. Purchases and refunds should be reflected by your trusted backend.
             </div>
@@ -1037,7 +1050,16 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
             <button class="wallet-amount-btn" type="button" data-wallet-amount="2000">₹2,000</button>
             <button class="wallet-amount-btn" type="button" data-wallet-amount="5000">₹5,000</button>
           </div>
-          <input class="wallet-input" id="wallet-custom-amount" type="number" min="1" max="50000" step="1" placeholder="Or enter custom amount" />
+          <div style="margin-top:12px;font-size:11px;color:var(--color-text-secondary);">Or set a custom amount</div>
+          <div class="wallet-stepper" id="wallet-amount-stepper">
+            <button class="wallet-stepper__btn" id="wallet-amount-decrement" type="button" aria-label="Decrease amount">−</button>
+            <div class="wallet-stepper__value-wrap">
+              <span class="wallet-stepper__currency">₹</span>
+              <input class="wallet-stepper__input" id="wallet-custom-amount" type="number" min="1" max="50000" step="1" placeholder="0" inputmode="numeric" />
+            </div>
+            <button class="wallet-stepper__btn" id="wallet-amount-increment" type="button" aria-label="Increase amount">+</button>
+          </div>
+          <div style="margin-top:6px;font-size:10px;color:var(--color-text-muted);">Tap − / + to adjust by ₹50 (hold near the limits: min ₹1, max ₹50,000)</div>
           <div class="wallet-payment-list">
             <label class="wallet-payment-option"><input type="radio" name="wallet-topup-method" value="UPI" checked /> UPI</label>
             <label class="wallet-payment-option"><input type="radio" name="wallet-topup-method" value="Other" /> Other supported payment</label>
@@ -1268,6 +1290,43 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
       <div class="settings-actions">
         <button class="tx-btn-secondary" type="button" id="close-biometric-btn">CLOSE</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="auth-modal-overlay">
+  <div class="product-modal tx-card" style="max-width:400px;">
+    <button class="product-modal__close" id="auth-modal-close" aria-label="Close">✕</button>
+    <div class="product-modal__icon" style="background:var(--color-purple-dim);">🛡️</div>
+    <div class="product-modal__game">TOURNYX ACCOUNT</div>
+    <div class="product-modal__name" id="auth-modal-title">Sign In</div>
+
+    <div style="display:flex;gap:8px;margin:16px 0;">
+      <button class="tx-btn-secondary" id="auth-tab-signin" type="button" style="flex:1;">SIGN IN</button>
+      <button class="tx-btn-secondary" id="auth-tab-signup" type="button" style="flex:1;">SIGN UP</button>
+    </div>
+
+    <div class="settings-field" style="margin-bottom:12px;">
+      <label for="auth-email">Email</label>
+      <input id="auth-email" class="checkout-input" type="email" placeholder="you@example.com" autocomplete="email" />
+    </div>
+    <div class="settings-field" style="margin-bottom:6px;">
+      <label for="auth-password">Password</label>
+      <input id="auth-password" class="checkout-input" type="password" placeholder="At least 8 characters" autocomplete="current-password" minlength="8" />
+    </div>
+
+    <button class="tx-btn-primary" id="auth-submit-btn" type="button" style="width:100%;margin-top:14px;">SIGN IN</button>
+    <div id="auth-message" class="settings-status" style="margin-top:10px;"></div>
+
+    <div style="margin:18px 0;display:flex;align-items:center;gap:10px;color:var(--color-text-muted);font-size:11px;">
+      <div style="flex:1;height:1px;background:var(--color-border-subtle);"></div>
+      OR
+      <div style="flex:1;height:1px;background:var(--color-border-subtle);"></div>
+    </div>
+
+    <button class="tx-btn-secondary" id="auth-guest-btn" type="button" style="width:100%;">CONTINUE IN DEMO MODE</button>
+    <div style="margin-top:8px;font-size:10px;color:var(--color-text-muted);line-height:1.5;">
+      Demo mode lets you click through the UI (cart, settings, top-ups, etc.) without a real account. Actions that require real backend verification — payment confirmation, gift code reveal, wallet credit — will show a backend error, since there's no real signed-in Supabase session behind demo mode.
     </div>
   </div>
 </div>
@@ -2185,12 +2244,17 @@ function renderSession(user) {
   const nameEl = document.getElementById("user-name");
   const dashAvatar = document.getElementById("dash-player-avatar");
   const dashId = document.getElementById("dash-player-id");
+  const signInBtn = document.getElementById("topbar-signin-btn");
+  const accountInfo = document.getElementById("user-account-info");
+
   if (user) {
     const initial = (user.displayName || user.email || "?").slice(0, 1).toUpperCase();
     avatar.textContent = initial;
     nameEl.textContent = user.displayName || user.email || "Player";
     dashAvatar.textContent = initial;
     dashId.textContent = `Player ID: ${user.playerId || "TXN-XXXX"}`;
+    if (signInBtn) signInBtn.style.display = "none";
+    if (accountInfo) accountInfo.style.display = "flex";
   } else {
     avatar.textContent = "?";
     nameEl.textContent = "Guest";
@@ -2198,8 +2262,169 @@ function renderSession(user) {
     dashId.textContent = "Player ID: TXN-XXXX";
     viewState.walletBalance = null;
     renderWallet();
+    if (signInBtn) signInBtn.style.display = "block";
+    if (accountInfo) accountInfo.style.display = "none";
   }
   if (store.getState().ui.activeTab === "dashboard") renderDashboard();
+}
+
+/* =============================================================
+   AUTH MODAL — Sign In / Sign Up (wired to the existing
+   signInWithPassword()/signUp() Supabase functions defined above)
+   plus a Demo Mode bypass that lets the UI be clicked through
+   without a real backend/account. Demo mode fabricates a local
+   user+session in the app's own store only — it does NOT create a
+   real Supabase auth session, so backend-verified actions (payment
+   confirm, gift code reveal, wallet credit) will still correctly
+   fail with a backend error while in demo mode.
+   ============================================================= */
+let authMode = "signin"; // "signin" | "signup"
+
+function setAuthMessage(message, type = "") {
+  const el = document.getElementById("auth-message");
+  if (!el) return;
+  el.style.color = type === "error" ? "var(--color-danger)" : type === "loading" ? "var(--color-cyan)" : "var(--color-success)";
+  el.textContent = message || "";
+}
+
+function updateAuthModalUI() {
+  const title = document.getElementById("auth-modal-title");
+  const submitBtn = document.getElementById("auth-submit-btn");
+  const tabSignin = document.getElementById("auth-tab-signin");
+  const tabSignup = document.getElementById("auth-tab-signup");
+  const isSignIn = authMode === "signin";
+
+  title.textContent = isSignIn ? "Sign In" : "Create Account";
+  submitBtn.textContent = isSignIn ? "SIGN IN" : "CREATE ACCOUNT";
+  tabSignin.classList.toggle("is-selected", isSignIn);
+  tabSignup.classList.toggle("is-selected", !isSignIn);
+  tabSignin.style.borderColor = isSignIn ? "var(--color-cyan)" : "";
+  tabSignup.style.borderColor = !isSignIn ? "var(--color-cyan)" : "";
+}
+
+function openAuthModal() {
+  authMode = "signin";
+  updateAuthModalUI();
+  setAuthMessage("");
+  document.getElementById("auth-email").value = "";
+  document.getElementById("auth-password").value = "";
+  document.getElementById("auth-modal-overlay").classList.add("is-open");
+}
+
+function closeAuthModal() {
+  document.getElementById("auth-modal-overlay").classList.remove("is-open");
+}
+
+async function handleAuthSubmit() {
+  const email = document.getElementById("auth-email").value.trim();
+  const password = document.getElementById("auth-password").value;
+  const submitBtn = document.getElementById("auth-submit-btn");
+
+  if (!email || !password) {
+    setAuthMessage("Enter both email and password.", "error");
+    return;
+  }
+  if (password.length < 8) {
+    setAuthMessage("Password must be at least 8 characters.", "error");
+    return;
+  }
+
+  setButtonState(submitBtn, "loading", { loading: authMode === "signin" ? "SIGNING IN…" : "CREATING ACCOUNT…" });
+  setAuthMessage(authMode === "signin" ? "Signing in…" : "Creating your account…", "loading");
+
+  try {
+    if (authMode === "signin") {
+      await signInWithPassword(email, password);
+      setAuthMessage("Signed in ✓", "success");
+      setButtonState(submitBtn, "success", { success: "✓ SIGNED IN" });
+      setTimeout(() => { closeAuthModal(); setButtonState(submitBtn, "idle"); }, 500);
+    } else {
+      await signUp(email, password);
+      setAuthMessage("Account created. Check your email to confirm, then sign in.", "success");
+      setButtonState(submitBtn, "idle");
+      authMode = "signin";
+      updateAuthModalUI();
+    }
+  } catch (err) {
+    setAuthMessage(err?.message || "Authentication failed. Please try again.", "error");
+    setButtonState(submitBtn, "error", { retry: authMode === "signin" ? "✕ TRY AGAIN" : "✕ TRY AGAIN" });
+    setTimeout(() => setButtonState(submitBtn, "idle"), 1200);
+  }
+}
+
+function continueAsGuestDemo() {
+  const demoUser = {
+    id: "demo-local-user",
+    email: "demo@tournyx.local",
+    displayName: "Demo Player",
+    playerId: "TXN-DEMO1",
+  };
+  const demoSession = {
+    accessToken: "demo-local-session",
+    refreshToken: "demo-local-session",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+  };
+  store.setUserSession({ user: demoUser, session: demoSession });
+  closeAuthModal();
+}
+
+async function handleTopbarSignOut() {
+  try {
+    await signOut();
+  } catch (err) {
+    // Demo-mode sessions aren't real Supabase sessions — signOut() may
+    // no-op or error harmlessly. Either way, clear local app state.
+    store.clearUserSession();
+  }
+  navigateTo("dashboard");
+}
+
+function initAuthModal() {
+  document.getElementById("topbar-signin-btn")?.addEventListener("click", openAuthModal);
+  document.getElementById("topbar-signout-btn")?.addEventListener("click", (e) => { e.stopPropagation(); handleTopbarSignOut(); });
+  document.getElementById("auth-modal-close")?.addEventListener("click", closeAuthModal);
+  document.getElementById("auth-modal-overlay")?.addEventListener("click", (e) => {
+    if (e.target.id === "auth-modal-overlay") closeAuthModal();
+  });
+  document.getElementById("auth-tab-signin")?.addEventListener("click", () => { authMode = "signin"; updateAuthModalUI(); setAuthMessage(""); });
+  document.getElementById("auth-tab-signup")?.addEventListener("click", () => { authMode = "signup"; updateAuthModalUI(); setAuthMessage(""); });
+  document.getElementById("auth-submit-btn")?.addEventListener("click", handleAuthSubmit);
+  document.getElementById("auth-guest-btn")?.addEventListener("click", continueAsGuestDemo);
+  document.getElementById("auth-password")?.addEventListener("keydown", (e) => { if (e.key === "Enter") handleAuthSubmit(); });
+  updateAuthModalUI();
+}
+
+/* =============================================================
+   TOPBAR SHORTCUTS — wires up previously inert topbar controls:
+   the wallet "＋" chip, the notification bell, and the signed-in
+   user/avatar area (name + avatar, not the "Sign Out" sub-label).
+   ============================================================= */
+function initNotifications() {
+  const bell = document.getElementById("notif-bell-btn");
+  const dropdown = document.getElementById("notif-dropdown");
+  if (!bell || !dropdown) return;
+  bell.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isOpen = dropdown.style.display === "block";
+    dropdown.style.display = isOpen ? "none" : "block";
+  });
+  dropdown.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => { dropdown.style.display = "none"; });
+}
+
+function initTopbarShortcuts() {
+  document.getElementById("wallet-chip-add-btn")?.addEventListener("click", () => {
+    navigateTo("wallet");
+    setTimeout(openWalletAddMoney, 120);
+  });
+  document.getElementById("user-account-info")?.addEventListener("click", () => navigateTo("settings"));
+}
+
+function initSidebarShortcuts() {
+  document.getElementById("sidebar-upgrade-btn")?.addEventListener("click", () => navigateTo("subs"));
+  document.getElementById("sidebar-support-btn")?.addEventListener("click", () => {
+    window.location.href = "mailto:support@tournyx.com?subject=Tournyx%20Support%20Request";
+  });
 }
 
 /* =============================================================
@@ -2615,9 +2840,10 @@ function renderCart() {
   const checkoutBtn = document.getElementById("cart-checkout-btn");
 
   const cartItems = store.getState().cart.items;
-  const entries = cartItems.map((item) => ({
-    ...item,
-    product: getCartProduct(item.productId),
+  const entries = Object.entries(cartItems).map(([productId, qty]) => ({
+    productId,
+    qty,
+    product: getCartProduct(productId),
   })).filter((item) => item.product);
 
   const totalQty = entries.reduce((sum, item) => sum + item.qty, 0);
@@ -2671,7 +2897,7 @@ function renderCart() {
   listEl.querySelectorAll("[data-cart-action]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const productId = btn.dataset.cartId;
-      const currentQty = store.getState().cart.items.find((i) => i.productId === productId)?.qty ?? 0;
+      const currentQty = store.getState().cart.items[productId] ?? 0;
       const increasing = btn.dataset.cartAction === "increase";
       btn.disabled = true;
       btn.textContent = "…";
@@ -2710,7 +2936,7 @@ async function handleCartCheckout() {
   feedback.className = "cart-feedback";
   feedback.textContent = "";
 
-  if (!state.cart.items.length) {
+  if (!Object.keys(state.cart.items).length) {
     feedback.className = "cart-feedback is-error";
     feedback.textContent = "Your cart is empty.";
     return;
@@ -2752,9 +2978,10 @@ let checkoutState = {
 
 function getCheckoutEntries() {
   const items = store.getState().cart.items;
-  return items.map((item) => ({
-    ...item,
-    product: getCartProduct(item.productId),
+  return Object.entries(items).map(([productId, qty]) => ({
+    productId,
+    qty,
+    product: getCartProduct(productId),
   })).filter((item) => item.product);
 }
 
@@ -2867,7 +3094,7 @@ async function handleCheckoutStart() {
   try {
     const state = store.getState();
     if (!state.userSession?.user) throw new ApiError("Please sign in before checkout.", 401);
-    if (!state.cart.items.length) throw new ApiError("Your cart is empty.", 400);
+    if (!Object.keys(state.cart.items).length) throw new ApiError("Your cart is empty.", 400);
 
     // Existing secure API function remains the only source for checkout initialization.
     const response = await initCheckout();
@@ -3134,7 +3361,44 @@ function renderWalletPage() {
     <div class="topup-detail-row"><span>Statement Period</span><strong>Recent wallet activity</strong></div>`;
 }
 
-function openWalletAddMoney() { document.getElementById("wallet-add-money-overlay").classList.add("is-open"); }
+const WALLET_AMOUNT_MIN = 1;
+const WALLET_AMOUNT_MAX = 50000;
+const WALLET_AMOUNT_STEP = 50;
+
+function clampWalletAmount(value) {
+  if (!Number.isFinite(value)) return WALLET_AMOUNT_MIN;
+  return Math.min(WALLET_AMOUNT_MAX, Math.max(WALLET_AMOUNT_MIN, value));
+}
+
+/** Sets the amount input, syncs walletState, updates chip highlighting, and disables +/- at the bounds. */
+function setWalletAmount(value, { clamp = true } = {}) {
+  const input = document.getElementById("wallet-custom-amount");
+  const decBtn = document.getElementById("wallet-amount-decrement");
+  const incBtn = document.getElementById("wallet-amount-increment");
+  const finalValue = clamp ? clampWalletAmount(value) : value;
+
+  input.value = finalValue > 0 ? String(finalValue) : "";
+  walletState.selectedAmount = finalValue > 0 ? finalValue : null;
+
+  document.querySelectorAll("[data-wallet-amount]").forEach((b) => {
+    b.classList.toggle("is-selected", Number(b.dataset.walletAmount) === finalValue);
+  });
+
+  if (decBtn) decBtn.disabled = finalValue <= WALLET_AMOUNT_MIN;
+  if (incBtn) incBtn.disabled = finalValue >= WALLET_AMOUNT_MAX;
+}
+
+function stepWalletAmount(direction) {
+  const input = document.getElementById("wallet-custom-amount");
+  const current = Number(input.value || 0);
+  const base = current > 0 ? current : (direction > 0 ? 0 : WALLET_AMOUNT_STEP);
+  setWalletAmount(base + direction * WALLET_AMOUNT_STEP);
+}
+
+function openWalletAddMoney() {
+  document.getElementById("wallet-add-money-overlay").classList.add("is-open");
+  setWalletAmount(500); // sensible default so +/- has something to work from immediately
+}
 function closeWalletAddMoney() { document.getElementById("wallet-add-money-overlay").classList.remove("is-open"); }
 
 function handleWalletTopupContinue() {
@@ -3163,6 +3427,43 @@ function handleWalletTopupContinue() {
   renderWalletPage();
 }
 
+/** Refresh button: actually shows loading/success/error instead of failing silently when there's no signed-in user or no real `wallets` row yet. */
+async function handleWalletRefreshClick() {
+  const btn = document.getElementById("wallet-refresh-btn");
+  const statusEl = document.getElementById("wallet-overview-status");
+  const { userSession } = store.getState();
+
+  if (!userSession.user) {
+    setActionFeedback(statusEl, "Sign in first — there's no account to refresh a balance for.", "error");
+    return;
+  }
+
+  setButtonState(btn, "loading", { loading: "REFRESHING…" });
+  setActionFeedback(statusEl, "Refreshing wallet balance…", "loading");
+
+  await refreshWallet();
+  renderWalletPage();
+
+  if (viewState.walletBalance === null) {
+    setButtonState(btn, "error", { retry: "↻ Refresh" });
+    setActionFeedback(statusEl, "Couldn't load a balance for this account. Make sure a matching row exists in your Supabase 'wallets' table.", "error");
+  } else {
+    setButtonState(btn, "success", { success: "✓ Updated" });
+    setActionFeedback(statusEl, "Balance refreshed ✓", "success");
+  }
+  setTimeout(() => setButtonState(btn, "idle"), 1200);
+}
+
+/** History button: gives a brief loading pulse before switching tabs, so the click registers visibly instead of feeling like a no-op. */
+function handleWalletHistoryClick() {
+  const btn = document.getElementById("wallet-topup-history-btn");
+  setButtonState(btn, "loading", { loading: "OPENING…" });
+  setTimeout(() => {
+    navigateTo("topup");
+    setButtonState(btn, "idle");
+  }, 200);
+}
+
 function initWalletPage() {
   document.getElementById("wallet-add-money-btn")?.addEventListener("click", openWalletAddMoney);
   document.getElementById("wallet-add-money-close")?.addEventListener("click", closeWalletAddMoney);
@@ -3171,13 +3472,24 @@ function initWalletPage() {
   document.getElementById("wallet-status-close")?.addEventListener("click", () => document.getElementById("wallet-status-overlay").classList.remove("is-open"));
   document.getElementById("wallet-status-overlay")?.addEventListener("click", (e) => { if (e.target.id === "wallet-status-overlay") e.currentTarget.classList.remove("is-open"); });
   document.querySelectorAll("[data-wallet-amount]").forEach((btn) => btn.addEventListener("click", () => {
-    walletState.selectedAmount = Number(btn.dataset.walletAmount);
-    document.getElementById("wallet-custom-amount").value = "";
-    document.querySelectorAll("[data-wallet-amount]").forEach((b) => b.classList.toggle("is-selected", b === btn));
+    setWalletAmount(Number(btn.dataset.walletAmount));
   }));
+  document.getElementById("wallet-amount-decrement")?.addEventListener("click", () => stepWalletAmount(-1));
+  document.getElementById("wallet-amount-increment")?.addEventListener("click", () => stepWalletAmount(1));
+  document.getElementById("wallet-custom-amount")?.addEventListener("input", (e) => {
+    const raw = Number(e.target.value);
+    walletState.selectedAmount = raw > 0 ? raw : null;
+    document.querySelectorAll("[data-wallet-amount]").forEach((b) => b.classList.toggle("is-selected", Number(b.dataset.walletAmount) === raw));
+    document.getElementById("wallet-amount-decrement").disabled = raw <= WALLET_AMOUNT_MIN;
+    document.getElementById("wallet-amount-increment").disabled = raw >= WALLET_AMOUNT_MAX;
+  });
+  document.getElementById("wallet-custom-amount")?.addEventListener("blur", (e) => {
+    const raw = Number(e.target.value || 0);
+    if (raw > 0) setWalletAmount(raw); // clamp to min/max once the user finishes typing
+  });
   document.getElementById("wallet-add-money-continue")?.addEventListener("click", handleWalletTopupContinue);
-  document.getElementById("wallet-refresh-btn")?.addEventListener("click", async () => { await refreshWallet(); renderWalletPage(); });
-  document.getElementById("wallet-topup-history-btn")?.addEventListener("click", () => navigateTo("topup"));
+  document.getElementById("wallet-refresh-btn")?.addEventListener("click", handleWalletRefreshClick);
+  document.getElementById("wallet-topup-history-btn")?.addEventListener("click", handleWalletHistoryClick);
   document.getElementById("wallet-statement-btn")?.addEventListener("click", () => { document.getElementById("wallet-statement-card")?.scrollIntoView({ behavior:"smooth", block:"center" }); });
   renderWalletPage();
 }
@@ -3580,6 +3892,10 @@ async function main() {
   initGiftCards();
   initSubscriptions();
   initAccountSettings();
+  initAuthModal();
+  initNotifications();
+  initTopbarShortcuts();
+  initSidebarShortcuts();
   updateCartBadge();
 
   if (!location.hash) location.hash = "#/dashboard";
