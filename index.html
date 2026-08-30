@@ -617,6 +617,7 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
 @media (max-width: 860px) { .settings-grid { grid-template-columns:1fr; } }
 @media (max-width: 560px) { .settings-form { grid-template-columns:1fr; } .settings-field--full { grid-column:auto; } .profile-head { align-items:flex-start; } }
 </style>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
 <body>
 
@@ -817,27 +818,14 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
                     </span>
                   </label>
                   <label class="payment-option">
-                    <input type="radio" name="tournyx-payment" value="upi" />
+                    <input type="radio" name="tournyx-payment" value="razorpay" />
                     <span>
-                      <span class="payment-option__name">📲 UPI</span>
-                      <span class="payment-option__meta">Continue with your supported UPI flow</span>
-                    </span>
-                  </label>
-                  <label class="payment-option">
-                    <input type="radio" name="tournyx-payment" value="other" />
-                    <span>
-                      <span class="payment-option__name">⚡ Other Supported Payment</span>
-                      <span class="payment-option__meta">Use the payment provider configured for Tournyx</span>
+                      <span class="payment-option__name">📲 UPI / Card / NetBanking</span>
+                      <span class="payment-option__meta">Pay securely via Razorpay — choose UPI, card or netbanking in the next step</span>
                     </span>
                   </label>
                 </div>
                 <div id="checkout-payment-message" class="checkout-message"></div>
-
-                <div id="checkout-reference" class="checkout-reference">
-                  <label class="checkout-reference__label" for="payment-reference">Payment Reference</label>
-                  <input id="payment-reference" class="checkout-input" type="text" maxlength="120" placeholder="Enter the payment reference returned by your provider" autocomplete="off" />
-                  <div style="margin-top:6px;font-size:10px;color:var(--color-text-muted);">This is required only when the backend payment flow returns a reference that must be confirmed.</div>
-                </div>
               </div>
             </div>
 
@@ -846,8 +834,7 @@ table.topup-table { width:100%; border-collapse:collapse; font-size:13px; min-wi
               <div class="checkout-summary__row"><span>Subtotal</span><strong id="checkout-subtotal">₹0.00</strong></div>
               <div class="checkout-summary__row"><span>Discount</span><strong id="checkout-discount">-₹0.00</strong></div>
               <div class="checkout-summary__total"><span>TOTAL</span><strong id="checkout-total">₹0.00</strong></div>
-              <button id="checkout-start-btn" class="tx-btn-primary" type="button" style="width:100%;margin-top:18px;">INITIALIZE SECURE CHECKOUT</button>
-              <button id="checkout-confirm-btn" class="tx-btn-primary" type="button" style="width:100%;margin-top:10px;display:none;">CONFIRM PAYMENT</button>
+              <button id="checkout-start-btn" class="tx-btn-primary" type="button" style="width:100%;margin-top:18px;">PAY NOW</button>
               <button id="checkout-back-cart-btn" class="tx-btn-secondary" type="button" style="width:100%;margin-top:10px;">BACK TO CART</button>
               <div id="checkout-main-message" class="checkout-message"></div>
               <div class="checkout-security">🛡️ Final prices, discounts, payment validation, and order authorization are determined by the backend. Client-side amounts are display-only.</div>
@@ -1703,9 +1690,32 @@ async function initCheckout() {
   return invokeEdgeFunction("checkout-init", payload);
 }
 
-async function confirmOrder(orderId, paymentReference) {
-  if (!orderId || !paymentReference) throw new ApiError("confirmOrder requires an orderId and paymentReference.", 400);
-  return invokeEdgeFunction("order-confirm", { orderId, paymentReference });
+/** Wallet payment path: deducts balance and marks the order successful atomically, server-side. No Razorpay involved. */
+async function initWalletCheckout() {
+  const { cart, serverRegion, voucher, userSession } = store.getState();
+  if (!userSession.user || !userSession.session) throw new ApiError("You must be signed in to check out.", 401);
+  const productIds = Object.keys(cart.items);
+  if (!productIds.length) throw new ApiError("Your cart is empty.", 400);
+  const payload = {
+    items: productIds.map((productId) => ({ productId, qty: cart.items[productId] })),
+    regionId: serverRegion.selectedRegion,
+    voucherCode: voucher.code,
+  };
+  return invokeEdgeFunction("wallet-checkout", payload);
+}
+
+/**
+ * Confirms a Razorpay payment. `paymentPayload` is the object Razorpay's
+ * Checkout.js handler callback returns: { razorpay_payment_id,
+ * razorpay_order_id, razorpay_signature }. The backend re-derives the
+ * HMAC signature from razorpay_order_id + razorpay_payment_id using the
+ * Razorpay key secret (never exposed to the client) and only marks the
+ * order successful if it matches — the client cannot forge a "successful"
+ * payment by sending fake IDs.
+ */
+async function confirmOrder(orderId, paymentPayload) {
+  if (!orderId || !paymentPayload) throw new ApiError("confirmOrder requires an orderId and the Razorpay payment payload.", 400);
+  return invokeEdgeFunction("order-confirm", { orderId, ...paymentPayload });
 }
 
 /**
@@ -2381,7 +2391,7 @@ async function handleTopbarSignOut() {
 
 function initAuthModal() {
   document.getElementById("topbar-signin-btn")?.addEventListener("click", openAuthModal);
-  document.getElementById("topbar-signout-btn")?.addEventListener("click", (e) => { e.stopPropagation(); handleTopbarSignOut(); });
+  document.getElementById("topbar-signout-btn")?.addEventListener("click", handleTopbarSignOut);
   document.getElementById("auth-modal-close")?.addEventListener("click", closeAuthModal);
   document.getElementById("auth-modal-overlay")?.addEventListener("click", (e) => {
     if (e.target.id === "auth-modal-overlay") closeAuthModal();
@@ -2392,39 +2402,6 @@ function initAuthModal() {
   document.getElementById("auth-guest-btn")?.addEventListener("click", continueAsGuestDemo);
   document.getElementById("auth-password")?.addEventListener("keydown", (e) => { if (e.key === "Enter") handleAuthSubmit(); });
   updateAuthModalUI();
-}
-
-/* =============================================================
-   TOPBAR SHORTCUTS — wires up previously inert topbar controls:
-   the wallet "＋" chip, the notification bell, and the signed-in
-   user/avatar area (name + avatar, not the "Sign Out" sub-label).
-   ============================================================= */
-function initNotifications() {
-  const bell = document.getElementById("notif-bell-btn");
-  const dropdown = document.getElementById("notif-dropdown");
-  if (!bell || !dropdown) return;
-  bell.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const isOpen = dropdown.style.display === "block";
-    dropdown.style.display = isOpen ? "none" : "block";
-  });
-  dropdown.addEventListener("click", (e) => e.stopPropagation());
-  document.addEventListener("click", () => { dropdown.style.display = "none"; });
-}
-
-function initTopbarShortcuts() {
-  document.getElementById("wallet-chip-add-btn")?.addEventListener("click", () => {
-    navigateTo("wallet");
-    setTimeout(openWalletAddMoney, 120);
-  });
-  document.getElementById("user-account-info")?.addEventListener("click", () => navigateTo("settings"));
-}
-
-function initSidebarShortcuts() {
-  document.getElementById("sidebar-upgrade-btn")?.addEventListener("click", () => navigateTo("subs"));
-  document.getElementById("sidebar-support-btn")?.addEventListener("click", () => {
-    window.location.href = "mailto:support@tournyx.com?subject=Tournyx%20Support%20Request";
-  });
 }
 
 /* =============================================================
@@ -3012,7 +2989,6 @@ function renderCheckout() {
   const entries = getCheckoutEntries();
   const totals = getCheckoutDisplayTotals();
   const startBtn = document.getElementById("checkout-start-btn");
-  const confirmBtn = document.getElementById("checkout-confirm-btn");
 
   document.getElementById("checkout-subtotal").textContent = formatAmount(totals.subtotal);
   document.getElementById("checkout-discount").textContent = `-${formatAmount(totals.discount)}`;
@@ -3021,7 +2997,6 @@ function renderCheckout() {
   if (!entries.length) {
     list.innerHTML = `<div class="empty-state">Your cart is empty. Add products before starting checkout.</div>`;
     startBtn.disabled = true;
-    confirmBtn.style.display = "none";
     return;
   }
 
@@ -3038,7 +3013,6 @@ function renderCheckout() {
     </div>`).join("");
 
   startBtn.disabled = false;
-  if (!checkoutState.checkoutInitResponse) confirmBtn.style.display = "none";
 }
 
 async function handleVoucherApply() {
@@ -3079,111 +3053,151 @@ async function handleVoucherApply() {
   }
 }
 
-async function handleCheckoutStart() {
-  const btn = document.getElementById("checkout-start-btn");
-  const confirmBtn = document.getElementById("checkout-confirm-btn");
-  const referenceBox = document.getElementById("checkout-reference");
-  const selectedPayment = document.querySelector('input[name="tournyx-payment"]:checked')?.value || "wallet";
+/** Completes the order UI once a payment (wallet or Razorpay) has actually succeeded server-side. */
+function showOrderConfirmed(orderId) {
+  document.getElementById("checkout-confirm-order-id").textContent = orderId;
+  document.getElementById("checkout-main").style.display = "none";
+  document.getElementById("checkout-confirm").classList.add("is-visible");
+  renderCheckoutSteps(4);
+  store.clearCart();
+  updateCartBadge();
+  renderCart();
+}
 
-  checkoutState.paymentMethod = selectedPayment;
-  btn.disabled = true;
-  btn.textContent = "INITIALIZING…";
-  setCheckoutMessage("checkout-main-message", "Creating a secure checkout session…", "loading");
+/** Wallet path: single atomic backend call, no external redirect/popup — completes immediately on success. */
+async function payWithWallet() {
+  const btn = document.getElementById("checkout-start-btn");
+  setButtonState(btn, "loading", { loading: "DEBITING WALLET…" });
+  setCheckoutMessage("checkout-main-message", "Verifying wallet balance and creating your order…", "loading");
   renderCheckoutSteps(3);
 
   try {
-    const state = store.getState();
-    if (!state.userSession?.user) throw new ApiError("Please sign in before checkout.", 401);
-    if (!Object.keys(state.cart.items).length) throw new ApiError("Your cart is empty.", 400);
-
-    // Existing secure API function remains the only source for checkout initialization.
-    const response = await initCheckout();
-    checkoutState.checkoutInitResponse = response;
-    checkoutState.orderId = response?.orderId || response?.order?.id || response?.id || null;
-
-    const needsReference = Boolean(response?.requiresPaymentReference || response?.paymentReferenceRequired);
-    referenceBox.classList.toggle("is-visible", needsReference);
-    confirmBtn.style.display = checkoutState.orderId ? "block" : "none";
-    btn.style.display = "none";
-
-    const providerMessage = response?.message || (checkoutState.orderId
-      ? `Checkout initialized using ${selectedPayment.toUpperCase()}. Complete the configured payment flow, then confirm the order.`
-      : `Checkout initialized using ${selectedPayment.toUpperCase()}. Complete the configured payment flow; the backend must return an order ID before confirmation.`);
-    setCheckoutMessage("checkout-main-message", providerMessage, checkoutState.orderId ? "success" : "loading");
-    if (checkoutState.orderId) {
-      btn.classList.add("tx-action-done");
-      btn.textContent = "✓ CHECKOUT READY";
-    }
+    const result = await initWalletCheckout();
+    const orderId = result?.orderId || result?.order?.id || result?.id;
+    if (!orderId) throw new ApiError("The backend did not return an order ID.", 502);
+    setButtonState(btn, "success", { success: "✓ PAID" });
+    setCheckoutMessage("checkout-main-message", "Payment confirmed successfully ✓", "success");
+    await refreshWallet(); // reflect the new (lower) balance immediately
+    showOrderConfirmed(orderId);
   } catch (err) {
-    btn.disabled = false;
-    btn.textContent = "INITIALIZE SECURE CHECKOUT";
+    setButtonState(btn, "error", { retry: "PAY NOW" });
     renderCheckoutSteps(2);
-    setCheckoutMessage("checkout-main-message", err instanceof ApiError ? err.message : "Unable to initialize checkout. Please try again.", "error");
+    const message = err instanceof ApiError ? err.message : "Wallet payment failed. Please try again.";
+    setCheckoutMessage("checkout-main-message", message, "error");
+    setTimeout(() => setButtonState(btn, "idle"), 1200);
   }
 }
 
-async function handleCheckoutConfirm() {
-  const confirmBtn = document.getElementById("checkout-confirm-btn");
-  const reference = document.getElementById("payment-reference").value.trim();
-  const response = checkoutState.checkoutInitResponse || {};
-  const orderId = checkoutState.orderId || response?.orderId || response?.order?.id || response?.id;
+/** Razorpay path: get a real Razorpay order from the backend, then open the actual Razorpay Checkout popup. */
+async function payWithRazorpay() {
+  const btn = document.getElementById("checkout-start-btn");
 
-  if (!orderId) {
-    setCheckoutMessage("checkout-main-message", "The backend did not return an order ID. The payment cannot be confirmed yet.", "error");
+  if (typeof Razorpay === "undefined") {
+    setCheckoutMessage("checkout-main-message", "Payment SDK failed to load. Check your connection and try again.", "error");
     return;
   }
 
-  if (!reference && (response?.requiresPaymentReference || response?.paymentReferenceRequired)) {
-    setCheckoutMessage("checkout-main-message", "Enter the payment reference returned by your payment provider.", "error");
-    return;
-  }
-
-  confirmBtn.disabled = true;
-  confirmBtn.textContent = "CONFIRMING…";
-  renderCheckoutSteps(4);
-  setCheckoutMessage("checkout-main-message", "Verifying payment and order ownership with the backend…", "loading");
+  setButtonState(btn, "loading", { loading: "OPENING RAZORPAY…" });
+  setCheckoutMessage("checkout-main-message", "Creating a secure Razorpay order…", "loading");
+  renderCheckoutSteps(3);
 
   try {
-    // Confirm against the backend; the browser does not mark the order successful by itself.
-    const backendReference = reference || response?.paymentReference || response?.payment_reference;
-    if (!backendReference) {
-      throw new ApiError("Enter the payment reference returned by the payment provider before confirming this order.", 400);
+    const response = await initCheckout(); // hits the checkout-init edge function
+    checkoutState.checkoutInitResponse = response;
+    const orderId = response?.orderId;
+    const razorpayOrderId = response?.razorpayOrderId;
+    const keyId = response?.keyId;
+    if (!orderId || !razorpayOrderId || !keyId) {
+      throw new ApiError("The backend did not return a valid Razorpay order.", 502);
     }
-    const result = await confirmOrder(orderId, backendReference);
-    const confirmedId = result?.orderId || result?.order?.id || orderId;
-    document.getElementById("checkout-confirm-order-id").textContent = confirmedId;
-    document.getElementById("checkout-main").style.display = "none";
-    document.getElementById("checkout-confirm").classList.add("is-visible");
-    setCheckoutMessage("checkout-main-message", "");
-    store.clearCart();
-    updateCartBadge();
-    renderCart();
-    confirmBtn.classList.add("tx-action-done");
-    confirmBtn.textContent = "✓ PAYMENT CONFIRMED";
-    setCheckoutMessage("checkout-main-message", "Payment confirmed successfully ✓", "success");
+    checkoutState.orderId = orderId;
+
+    const { userSession } = store.getState();
+    setButtonState(btn, "idle");
+    setCheckoutMessage("checkout-main-message", "Complete your payment in the Razorpay window.", "loading");
+
+    const rzp = new Razorpay({
+      key: keyId,
+      amount: Math.round(Number(response.amount) * 100), // paise
+      currency: response.currency || "INR",
+      name: "Tournyx Esports",
+      description: "Tournyx order payment",
+      order_id: razorpayOrderId,
+      prefill: { email: userSession.user?.email || "" },
+      theme: { color: "#8b5cf6" },
+      handler: async function (rzpResponse) {
+        // Razorpay confirms the popup succeeded — but the ORDER is only
+        // marked successful after the backend verifies rzpResponse's HMAC
+        // signature server-side. The client never marks its own order paid.
+        setCheckoutMessage("checkout-main-message", "Verifying payment with the backend…", "loading");
+        renderCheckoutSteps(4);
+        try {
+          const result = await confirmOrder(orderId, {
+            razorpay_payment_id: rzpResponse.razorpay_payment_id,
+            razorpay_order_id: rzpResponse.razorpay_order_id,
+            razorpay_signature: rzpResponse.razorpay_signature,
+          });
+          const confirmedId = result?.orderId || orderId;
+          setCheckoutMessage("checkout-main-message", "Payment confirmed successfully ✓", "success");
+          showOrderConfirmed(confirmedId);
+        } catch (err) {
+          renderCheckoutSteps(3);
+          setCheckoutMessage("checkout-main-message", err instanceof ApiError ? err.message : "Payment verification failed. If money was deducted, contact support with your payment ID.", "error");
+        }
+      },
+      modal: {
+        ondismiss: function () {
+          renderCheckoutSteps(2);
+          setCheckoutMessage("checkout-main-message", "Payment cancelled.", "error");
+        },
+      },
+    });
+
+    rzp.on("payment.failed", function (resp) {
+      renderCheckoutSteps(2);
+      setCheckoutMessage("checkout-main-message", `Payment failed: ${resp?.error?.description || "please try again."}`, "error");
+    });
+
+    rzp.open();
   } catch (err) {
-    confirmBtn.disabled = false;
-    confirmBtn.textContent = "CONFIRM PAYMENT";
-    renderCheckoutSteps(3);
-    setCheckoutMessage("checkout-main-message", err instanceof ApiError ? err.message : "Payment confirmation failed. Please try again.", "error");
+    setButtonState(btn, "error", { retry: "PAY NOW" });
+    renderCheckoutSteps(2);
+    setCheckoutMessage("checkout-main-message", err instanceof ApiError ? err.message : "Unable to start Razorpay checkout. Please try again.", "error");
+    setTimeout(() => setButtonState(btn, "idle"), 1200);
+  }
+}
+
+async function handleCheckoutStart() {
+  const state = store.getState();
+  const selectedPayment = document.querySelector('input[name="tournyx-payment"]:checked')?.value || "wallet";
+  checkoutState.paymentMethod = selectedPayment;
+
+  if (!state.userSession?.user) {
+    setCheckoutMessage("checkout-main-message", "Please sign in before checkout.", "error");
+    return;
+  }
+  if (!Object.keys(state.cart.items).length) {
+    setCheckoutMessage("checkout-main-message", "Your cart is empty.", "error");
+    return;
+  }
+
+  if (selectedPayment === "wallet") {
+    await payWithWallet();
+  } else {
+    await payWithRazorpay();
   }
 }
 
 function resetCheckoutView() {
   checkoutState = { voucherMessage: "", voucherApplied: false, paymentMethod: "wallet", checkoutInitResponse: null, orderId: null };
   const voucherInput = document.getElementById("checkout-voucher-input");
-  const referenceInput = document.getElementById("payment-reference");
   if (voucherInput) voucherInput.value = "";
-  if (referenceInput) referenceInput.value = "";
   document.getElementById("checkout-main").style.display = "";
   document.getElementById("checkout-confirm").classList.remove("is-visible");
-  document.getElementById("checkout-start-btn").style.display = "block";
-  document.getElementById("checkout-start-btn").disabled = false;
-  document.getElementById("checkout-start-btn").textContent = "INITIALIZE SECURE CHECKOUT";
-  document.getElementById("checkout-confirm-btn").style.display = "none";
-  document.getElementById("checkout-confirm-btn").disabled = false;
-  document.getElementById("checkout-confirm-btn").textContent = "CONFIRM PAYMENT";
-  document.getElementById("checkout-reference").classList.remove("is-visible");
+  const startBtn = document.getElementById("checkout-start-btn");
+  startBtn.style.display = "block";
+  setButtonState(startBtn, "idle", { idle: "PAY NOW" });
+  startBtn.textContent = "PAY NOW";
   setCheckoutMessage("checkout-voucher-message", "");
   setCheckoutMessage("checkout-main-message", "");
   renderCheckoutSteps(1);
@@ -3201,13 +3215,11 @@ function initCheckoutViewEvents() {
       document.querySelectorAll(".payment-option").forEach((el) => el.classList.remove("is-selected"));
       input.closest(".payment-option")?.classList.add("is-selected");
       checkoutState.paymentMethod = input.value;
-      setCheckoutMessage("checkout-main-message", `${input.value.toUpperCase()} selected ✓`, "success");
-      renderCheckoutSteps(3);
+      setCheckoutMessage("checkout-main-message", "");
     });
   });
 
   document.getElementById("checkout-start-btn").addEventListener("click", handleCheckoutStart);
-  document.getElementById("checkout-confirm-btn").addEventListener("click", handleCheckoutConfirm);
   document.getElementById("checkout-back-cart-btn").addEventListener("click", () => navigateTo("cart"));
   document.getElementById("checkout-view-order-btn").addEventListener("click", () => navigateTo("vault"));
   document.getElementById("checkout-back-shop-btn").addEventListener("click", () => navigateTo("shop"));
@@ -3893,9 +3905,6 @@ async function main() {
   initSubscriptions();
   initAccountSettings();
   initAuthModal();
-  initNotifications();
-  initTopbarShortcuts();
-  initSidebarShortcuts();
   updateCartBadge();
 
   if (!location.hash) location.hash = "#/dashboard";
