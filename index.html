@@ -1846,8 +1846,33 @@ const DEMO_PRODUCTS = [
 
 // Local UI state for the Shop tab — category filter, loaded products,
 // and which product (if any) the detail modal is currently showing.
+//
+// allProducts is hydrated from a short-lived sessionStorage cache below
+// so that a page reload between "add to cart" (on Shop) and viewing the
+// Cart tab doesn't wipe the in-memory catalog that getCartProduct()
+// depends on to resolve items already sitting in the cart.
+const PRODUCTS_CACHE_KEY = "tournyx_products_cache_v1";
+const PRODUCTS_CACHE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
+function loadCachedProducts() {
+  try {
+    const raw = sessionStorage.getItem(PRODUCTS_CACHE_KEY);
+    if (!raw) return [];
+    const { products, ts } = JSON.parse(raw);
+    if (!Array.isArray(products) || !ts) return [];
+    if (Date.now() - ts > PRODUCTS_CACHE_MAX_AGE_MS) return [];
+    return products;
+  } catch { return []; }
+}
+
+function cacheProducts(products) {
+  try {
+    sessionStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify({ products, ts: Date.now() }));
+  } catch {}
+}
+
 const shopState = {
-  allProducts: [],
+  allProducts: loadCachedProducts(),
   usingDemoData: false,
   loadError: null,
   category: "All",
@@ -1994,8 +2019,10 @@ async function fetchShopProducts() {
     try {
       const rows = await fetchProducts();
       shopState.usingDemoData = false;
-      return (rows || []).map((row) => ({
-        id: row.id,
+      const mapped = (rows || []).map((row) => ({
+        id: String(row.id), // normalize: Supabase can return numeric IDs, but cart
+                             // keys/dataset attributes are always strings — keeping
+                             // this consistent everywhere avoids 1 !== "1" mismatches
         name: row.name,
         game: row.game,
         quantity: row.quantity ?? row.sub ?? "",
@@ -2005,6 +2032,8 @@ async function fetchShopProducts() {
         iconBg: row.icon_bg || "#16232e",
         stock: row.stock != null ? Number(row.stock) : null,
       }));
+      cacheProducts(mapped); // keeps the Cart tab resolvable across a page reload
+      return mapped;
     } catch (err) {
       console.warn("[products] fetch failed:", err.message || err);
       if (ALLOW_DEMO_FALLBACK) {
@@ -2626,7 +2655,7 @@ function handleAddToCart(productId, btn) {
 }
 
 function openProductModal(productId) {
-  const product = shopState.allProducts.find((p) => p.id === productId);
+  const product = shopState.allProducts.find((p) => String(p.id) === String(productId));
   if (!product) return;
   shopState.activeProductId = productId;
 
@@ -2718,7 +2747,7 @@ const GIFT_CARD_BRANDS = [
 ];
 
 function getGiftCardProduct(productId) {
-  return GIFT_CARD_PRODUCTS.find((p) => p.id === productId) || null;
+  return GIFT_CARD_PRODUCTS.find((p) => String(p.id) === String(productId)) || null;
 }
 
 function renderGiftCards() {
@@ -2799,7 +2828,7 @@ function initGiftCards() {
    trusted backend source for final pricing/discounts.
    ============================================================= */
 function getCartProduct(productId) {
-  return shopState.allProducts.find((p) => p.id === productId) || DEMO_PRODUCTS.find((p) => p.id === productId) || getGiftCardProduct(productId) || null;
+  return shopState.allProducts.find((p) => String(p.id) === String(productId)) || DEMO_PRODUCTS.find((p) => String(p.id) === String(productId)) || getGiftCardProduct(productId) || null;
 }
 
 function getCartDiscount(subtotal) {
@@ -2817,16 +2846,22 @@ function renderCart() {
   const checkoutBtn = document.getElementById("cart-checkout-btn");
 
   const cartItems = store.getState().cart.items;
-  const entries = Object.entries(cartItems).map(([productId, qty]) => ({
+  const rawEntries = Object.entries(cartItems).map(([productId, qty]) => ({
     productId,
     qty,
     product: getCartProduct(productId),
-  })).filter((item) => item.product);
+  }));
+  const entries = rawEntries.filter((item) => item.product);
+  // Items whose ID exists in the cart but whose product couldn't be
+  // resolved from the currently loaded catalog (shopState.allProducts /
+  // DEMO_PRODUCTS / gift cards) — this used to render as a plain empty
+  // cart, silently hiding items the user actually added.
+  const unresolvedCount = rawEntries.length - entries.length;
 
   const totalQty = entries.reduce((sum, item) => sum + item.qty, 0);
   countEl.textContent = totalQty ? `${totalQty} item${totalQty === 1 ? "" : "s"} in your cart` : "Your Cart";
 
-  if (!entries.length) {
+  if (!rawEntries.length) {
     listEl.innerHTML = `
       <div class="cart-empty">
         <div class="cart-empty__icon">🛒</div>
@@ -2835,6 +2870,29 @@ function renderCart() {
         <button class="tx-btn-primary" id="cart-empty-shop-btn" type="button">BROWSE SHOP</button>
       </div>`;
     document.getElementById("cart-empty-shop-btn").addEventListener("click", () => navigateTo("shop"));
+    subtotalEl.textContent = formatAmount(0);
+    discountEl.textContent = `-${formatAmount(0)}`;
+    totalEl.textContent = formatAmount(0);
+    checkoutBtn.disabled = true;
+    return;
+  }
+
+  if (!entries.length && unresolvedCount > 0) {
+    // The cart genuinely has items — they just couldn't be matched to
+    // product data (catalog still loading, failed to load, or a stale
+    // product ID). Never present this as "cart is empty": that hides a
+    // real problem and can make items look lost when they aren't.
+    listEl.innerHTML = `
+      <div class="cart-empty">
+        <div class="cart-empty__icon">⚠️</div>
+        <h2>Couldn't load your cart items</h2>
+        <p>You have ${unresolvedCount} item${unresolvedCount === 1 ? "" : "s"} in your cart, but the product catalog didn't load. Try again.</p>
+        <button class="tx-btn-primary" id="cart-retry-load-btn" type="button">RETRY</button>
+      </div>`;
+    document.getElementById("cart-retry-load-btn").addEventListener("click", async () => {
+      await loadShop();
+      renderCart();
+    });
     subtotalEl.textContent = formatAmount(0);
     discountEl.textContent = `-${formatAmount(0)}`;
     totalEl.textContent = formatAmount(0);
@@ -2901,7 +2959,11 @@ function renderCart() {
 }
 
 async function initCartView() {
-  if (!shopState.allProducts.length && !shopState.loadError) {
+  // Always retry if we don't yet have products in memory — including
+  // after a previous failed attempt. A stale loadError from an earlier
+  // Shop visit must not permanently starve the Cart tab of the catalog
+  // it needs to resolve items already sitting in the cart.
+  if (!shopState.allProducts.length) {
     await loadShop();
   }
   renderCart();
